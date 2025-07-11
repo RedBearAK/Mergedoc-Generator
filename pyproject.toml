@@ -46,10 +46,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/RedBearAK/mergedoc_generator"
-Documentation = "https://github.com/RedBearAK/mergedoc_generator#readme"
-Repository = "https://github.com/RedBearAK/mergedoc_generator.git"
-"Bug Tracker" = "https://github.com/RedBearAK/mergedoc_generator/issues"
+Homepage = "https://github.com/RedBearAK/Mergedoc-Generator"
+Documentation = "https://github.com/RedBearAK/Mergedoc-Generator#readme"
+Repository = "https://github.com/RedBearAK/Mergedoc-Generator.git"
+"Bug Tracker" = "https://github.com/RedBearAK/Mergedoc-Generator/issues"
 
 [project.scripts]
 mergedoc = "mergedoc_generator.cli:main"
