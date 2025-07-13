@@ -3,6 +3,7 @@
 Invoice document type for the merged document generator.
 """
 
+import os
 import pandas as pd
 import json
 from datetime import datetime
@@ -10,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from mergedoc_generator.core.base import DocumentGenerator, DocumentConfig
-from mergedoc_generator.core.pdf_builder import PDFBuilder
-from reportlab.platypus import Spacer
+from mergedoc_generator.core.pdf_builder import PDFBuilder, colors
+from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.units import inch
 
 import logging
@@ -40,7 +41,10 @@ class DocumentConfig(DocumentConfig):
                 "name": "[YOUR COMPANY NAME]",
                 "address": "[YOUR COMPANY ADDRESS\nCITY, STATE ZIP CODE]",
                 "phone": "[YOUR PHONE NUMBER]",
-                "email": "[YOUR EMAIL ADDRESS]"
+                "email": "[YOUR EMAIL ADDRESS]",
+                "logo_path": "",
+                "logo_width": 1.2,
+                "logo_height": 0.8 
             },
             "fields": {
                 "document_number_field": "invoice_number",
@@ -124,23 +128,28 @@ class DocumentGenerator(DocumentGenerator):
         return grouped
     
     def _create_invoice_pdf(self, invoice_data: pd.DataFrame, filepath: str) -> None:
-        """Create a single invoice PDF."""
+        """Create a single invoice PDF with better section organization."""
         story = []
         
-        # Header section
-        story.extend(self._create_header(invoice_data.iloc[0]))
-        story.append(Spacer(1, 20))
+        # SECTION 1: Header
+        story.extend(self._create_header_with_logo(invoice_data.iloc[0]))
+        story.append(Spacer(1, 30))  # Larger space after header
         
-        # Customer information
+        # SECTION 2: Customer Info  
         story.extend(self._create_customer_info(invoice_data.iloc[0]))
-        story.append(Spacer(1, 20))
+        story.append(Spacer(1, 20))  # Standard space
         
-        # Line items table
+        # SECTION 3: Line Items
         story.extend(self._create_line_items_table(invoice_data))
-        story.append(Spacer(1, 20))
+        story.append(Spacer(1, 20))  # Standard space
         
-        # Totals section
+        # SECTION 4: Totals (right-aligned)
         story.extend(self._create_totals_section(invoice_data))
+        story.append(Spacer(1, 30))  # Space before footer
+        
+        # SECTION 5: Footer/Terms (optional)
+        if self.config.get('include_terms', False):
+            story.extend(self._create_terms_section())
         
         self.pdf_builder.create_document(filepath, story)
     
@@ -173,6 +182,68 @@ class DocumentGenerator(DocumentGenerator):
         header_table = self.pdf_builder.create_header_table(company_info, invoice_info)
         return [header_table]
     
+    def _create_header_with_logo(self, first_record: pd.Series) -> list[Any]:
+        """Create header with company logo."""
+        from reportlab.platypus import Image, Table, TableStyle
+        from reportlab.lib.units import inch
+        from reportlab.lib import colors
+        
+        # Company text info
+        company_info = f"""
+        <b>{self.config['company']['name']}</b><br/>
+        {self.config['company']['address']}<br/>
+        Phone: {self.config['company']['phone']}<br/>
+        Email: {self.config['company']['email']}
+        """
+        
+        # Invoice details
+        invoice_num = first_record[self.config['fields']['document_number_field']]
+        invoice_date = self.pdf_builder.format_date(
+            first_record.get(self.config['fields']['date_field'], datetime.now()),
+            self.config['formatting']['date_format']
+        )
+        
+        due_date = self.pdf_builder.format_date(
+            first_record.get(self.config['fields']['due_date_field'], datetime.now()),
+            self.config['formatting']['date_format']
+        )
+
+        invoice_info = f"""
+        <b>INVOICE</b><br/>
+        Invoice #: {invoice_num}<br/>
+        Date: {invoice_date}<br/>
+        Due Date: {due_date}
+        """
+        
+        # Try to load logo (make this configurable in your config)
+        logo_path = self.config.get('company', {}).get('logo_path')
+        if logo_path and os.path.exists(logo_path):
+            # Create logo with size constraints
+            logo_width = self.config['company'].get('logo_width', 1.2) * inch
+            logo_height = self.config['company'].get('logo_height', 0.8) * inch
+            logo = Image(logo_path, width=logo_width, height=logo_height, hAlign='LEFT')            
+            # Three-column layout: Logo | Company Info | Invoice Info
+            header_table = Table([
+                [logo, 
+                Paragraph(company_info, self.pdf_builder.styles['Normal']),
+                Paragraph(invoice_info, self.pdf_builder.styles['Normal'])]
+            ], colWidths=[1.2*inch, 2.8*inch, 2*inch])
+            
+        else:
+            # Two-column layout without logo (current behavior)
+            header_table = Table([
+                [Paragraph(company_info, self.pdf_builder.styles['Normal']), 
+                Paragraph(invoice_info, self.pdf_builder.styles['Normal'])]
+            ], colWidths=[3*inch, 3*inch])
+        
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ALIGN', (-1, 0), (-1, 0), 'RIGHT'),  # Right-align last column
+            ('GRID', (0, 0), (-1, -1), 0, colors.white),  # Invisible borders
+        ]))
+        
+        return [header_table]
+
     def _create_customer_info(self, first_record: pd.Series) -> list[Any]:
         """Create customer information section."""
         from reportlab.platypus import Paragraph
@@ -182,7 +253,17 @@ class DocumentGenerator(DocumentGenerator):
             if field in first_record and pd.notna(first_record[field]):
                 bill_to_text += f"{first_record[field]}<br/>"
         
-        return [Paragraph(bill_to_text, self.pdf_builder.styles['Normal'])]
+        customer_table = Table([
+            [Paragraph(bill_to_text, self.pdf_builder.styles['Normal']), ""]
+        ], colWidths=[3*inch, 3*inch])
+        
+        customer_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (0, 0), 0),  # Align with header above
+            ('GRID', (0, 0), (-1, -1), 0, colors.white),  # Invisible grid
+        ]))
+        
+        return [customer_table]
     
     def _create_line_items_table(self, invoice_data: pd.DataFrame) -> list[Any]:
         """Create line items table."""
@@ -277,7 +358,10 @@ def create_sample_config() -> None:
             "name": "Acme Corporation",
             "address": "123 Business Ave\nSuite 100\nBusiness City, BC 12345",
             "phone": "(555) 123-4567",
-            "email": "billing@acme.com"
+            "email": "billing@acme.com",
+            "logo_path": "",  # Add your logo file path here
+            "logo_width": 1.2,
+            "logo_height": 0.8
         },
         "fields": {
             "document_number_field": "invoice_number",
@@ -307,8 +391,8 @@ def create_sample_config() -> None:
     
     print("Sample invoice configuration created: invoice_config.json")
     print("⚠️  This contains example company information - please customize!")
+    print("📷 To add a logo: set 'logo_path' to your logo file (PNG/JPG)")
     print("💡 For permanent setup, use: python -m mergedoc_generator --type invoice --setup")
-
 
 def create_sample_data() -> None:
     """Create sample data file for testing invoices."""
