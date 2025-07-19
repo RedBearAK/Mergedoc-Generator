@@ -9,8 +9,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from mergedoc_generator.core.base import DocumentGenerator, DocumentConfig
+from mergedoc_generator.core.base import (
+    DocumentGenerator as BaseDocumentGenerator,
+    DocumentConfig as BaseDocumentConfig)
 from mergedoc_generator.core.pdf_builder import PDFBuilder
+from mergedoc_generator.core.position_converter import (
+    Point,
+    PositionConverter as pc
+)
 from reportlab.platypus import Spacer
 from reportlab.lib.units import inch
 
@@ -27,12 +33,12 @@ def get_document_info() -> dict[str, Any]:
     }
 
 
-class DocumentConfig(DocumentConfig):
+class DocumentConfig(BaseDocumentConfig):
     """Sales Order-specific configuration."""
     
     def get_default_config(self) -> dict[str, Any]:
         """Get default sales order configuration."""
-        base_config = super().get_default_config()
+        base_config: dict[str: Any] = super().get_default_config()
         
         sales_order_config = {
             "document_type": "sales_order",
@@ -77,16 +83,17 @@ class DocumentConfig(DocumentConfig):
         return base_config
 
 
-class DocumentGenerator(DocumentGenerator):
+class DocumentGenerator(BaseDocumentGenerator):
     """Sales Order document generator."""
     
     def __init__(self, config: DocumentConfig):
-        super().__init__(config)
-        self.pdf_builder = PDFBuilder(self.config)
+        super().__init__(config)                                # Creates 'self.config'
+        self.doc_cfg        = self.config           # Use type hint for config
+        self.pdf_builder    = PDFBuilder(self.doc_cfg)
     
     def generate_documents(self, data: pd.DataFrame, document_range: list[str] | None = None) -> list[str]:
         """Generate sales order documents from data."""
-        document_field = self.config['fields']['document_number_field']
+        document_field = self.doc_cfg['fields']['document_number_field']
         
         if document_field not in data.columns:
             raise ValueError(f"Document number field '{document_field}' not found in data")
@@ -102,7 +109,7 @@ class DocumentGenerator(DocumentGenerator):
         output_dir = self._create_output_directory()
         
         # Generate individual documents
-        if self.config['output']['individual_files']:
+        if self.doc_cfg['output']['individual_files']:
             for doc_num, doc_data in grouped_data.items():
                 filename = self._generate_filename(doc_num)
                 filepath = output_dir / filename
@@ -112,21 +119,32 @@ class DocumentGenerator(DocumentGenerator):
                 logger.info(f"Generated sales order: {filepath}")
         
         # Generate merged file if requested
-        if self.config['output']['merged_file'] and generated_files:
+        if self.doc_cfg['output']['merged_file'] and generated_files:
             merged_filename = output_dir / f"merged_sales_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             PDFBuilder.merge_pdfs(generated_files, str(merged_filename))
             logger.info(f"Generated merged file: {merged_filename}")
         
         return generated_files
     
-    def _group_document_data(self, data: pd.DataFrame, document_field: str) -> dict[str, pd.DataFrame]:
+    # def _group_document_data(self, data: pd.DataFrame, document_field: str) -> dict[str, pd.DataFrame]:
+    #     """Group data by document number."""
+    #     grouped = {}
+    #     for doc_num in data[document_field].unique():
+    #         doc_data = data[data[document_field] == doc_num].copy()
+    #         grouped[str(doc_num)] = doc_data
+    #     return grouped
+
+    def _group_document_data(self, data: pd.DataFrame,
+                                document_field: str) -> dict[str, pd.DataFrame]:
         """Group data by document number."""
         grouped = {}
         for doc_num in data[document_field].unique():
-            doc_data = data[data[document_field] == doc_num].copy()
+            # Filter and immediately annotate the result
+            filtered_data: pd.DataFrame = data[data[document_field] == doc_num]
+            doc_data: pd.DataFrame = filtered_data.copy()
             grouped[str(doc_num)] = doc_data
         return grouped
-    
+
     def _create_sales_order_pdf(self, order_data: pd.DataFrame, filepath: str) -> None:
         """Create a single sales order PDF."""
         story = []
@@ -154,26 +172,29 @@ class DocumentGenerator(DocumentGenerator):
     
     def _create_header(self, first_record: pd.Series) -> list[Any]:
         """Create sales order header."""
+        company_doc_cfg: dict[str: Any] = self.doc_cfg['company']   # type hint helper
         company_info = f"""
-        <b>{self.config['company']['name']}</b><br/>
-        {self.config['company']['address']}<br/>
-        Phone: {self.config['company']['phone']}<br/>
-        Email: {self.config['company']['email']}<br/>
-        Web: {self.config['company'].get('website', '')}
+        <b>{self.doc_cfg['company']['name']}</b><br/>
+        {self.doc_cfg['company']['address']}<br/>
+        Phone: {self.doc_cfg['company']['phone']}<br/>
+        Email: {self.doc_cfg['company']['email']}<br/>
+        Web: {company_doc_cfg.get('website', '')}
         """
         
-        order_num = first_record[self.config['fields']['document_number_field']]
+        order_num = first_record[self.doc_cfg['fields']['document_number_field']]
         order_date = self.pdf_builder.format_date(
-            first_record.get(self.config['fields']['date_field'], datetime.now()),
-            self.config['formatting']['date_format']
+            first_record.get(self.doc_cfg['fields']['date_field'], datetime.now()),
+            self.doc_cfg['formatting']['date_format']
         )
         ship_date = self.pdf_builder.format_date(
-            first_record.get(self.config['fields']['ship_date_field'], datetime.now() + timedelta(days=2)),
-            self.config['formatting']['date_format']
+            first_record.get(self.doc_cfg['fields']['ship_date_field'],
+                                datetime.now() + timedelta(days=2)),
+            self.doc_cfg['formatting']['date_format']
         )
         delivery_date = self.pdf_builder.format_date(
-            first_record.get(self.config['fields']['delivery_date_field'], datetime.now() + timedelta(days=7)),
-            self.config['formatting']['date_format']
+            first_record.get(self.doc_cfg['fields']['delivery_date_field'],
+                                datetime.now() + timedelta(days=7)),
+            self.doc_cfg['formatting']['date_format']
         )
         
         order_info = f"""
@@ -195,19 +216,19 @@ class DocumentGenerator(DocumentGenerator):
         
         # Customer info
         customer_text = "<b>Bill To:</b><br/>"
-        for field in self.config['fields']['customer_fields']:
+        for field in self.doc_cfg['fields']['customer_fields']:
             if field in first_record and pd.notna(first_record[field]):
                 customer_text += f"{first_record[field]}<br/>"
         
         # Shipping info
         ship_text = "<b>Ship To:</b><br/>"
-        for field in self.config['fields']['shipping_fields']:
+        for field in self.doc_cfg['fields']['shipping_fields']:
             if field in first_record and pd.notna(first_record[field]):
                 ship_text += f"{first_record[field]}<br/>"
         
         info_table = Table([
-            [Paragraph(customer_text, self.pdf_builder.styles['Normal']),
-             Paragraph(ship_text, self.pdf_builder.styles['Normal'])]
+            [   Paragraph(customer_text, self.pdf_builder.styles['Normal']),
+                Paragraph(ship_text, self.pdf_builder.styles['Normal'])]
         ], colWidths=[3*inch, 3*inch])
         
         from reportlab.platypus import TableStyle
@@ -222,10 +243,10 @@ class DocumentGenerator(DocumentGenerator):
         headers = ['Item Code', 'Description', 'Quantity', 'Unit Price', 'Total']
         table_data = [headers]
         
-        item_code_field = self.config['fields']['line_item_fields'][0]
-        desc_field = self.config['fields']['line_item_fields'][1]
-        qty_field = self.config['fields']['line_item_fields'][2]
-        price_field = self.config['fields']['line_item_fields'][3]
+        item_code_field = self.doc_cfg['fields']['line_item_fields'][0]
+        desc_field = self.doc_cfg['fields']['line_item_fields'][1]
+        qty_field = self.doc_cfg['fields']['line_item_fields'][2]
+        price_field = self.doc_cfg['fields']['line_item_fields'][3]
         
         for _, row in order_data.iterrows():
             item_code = str(row.get(item_code_field, ''))
@@ -240,13 +261,13 @@ class DocumentGenerator(DocumentGenerator):
                 f"{quantity:g}",
                 self.pdf_builder.format_currency(
                     unit_price, 
-                    self.config['formatting']['currency_symbol'],
-                    self.config['formatting']['number_format']
+                    self.doc_cfg['formatting']['currency_symbol'],
+                    self.doc_cfg['formatting']['number_format']
                 ),
                 self.pdf_builder.format_currency(
                     line_total,
-                    self.config['formatting']['currency_symbol'],
-                    self.config['formatting']['number_format']
+                    self.doc_cfg['formatting']['currency_symbol'],
+                    self.doc_cfg['formatting']['number_format']
                 )
             ])
         
@@ -259,8 +280,8 @@ class DocumentGenerator(DocumentGenerator):
     
     def _create_totals_section(self, order_data: pd.DataFrame) -> list[Any]:
         """Create totals section with calculations."""
-        qty_field = self.config['fields']['line_item_fields'][2]
-        price_field = self.config['fields']['line_item_fields'][3]
+        qty_field = self.doc_cfg['fields']['line_item_fields'][2]
+        price_field = self.doc_cfg['fields']['line_item_fields'][3]
         
         subtotal = 0
         for _, row in order_data.iterrows():
@@ -268,13 +289,13 @@ class DocumentGenerator(DocumentGenerator):
             unit_price = float(row.get(price_field, 0))
             subtotal += quantity * unit_price
         
-        shipping_cost = self.config['calculations']['shipping_cost']
-        tax_rate = self.config['calculations']['tax_rate']
+        shipping_cost = self.doc_cfg['calculations']['shipping_cost']
+        tax_rate = self.doc_cfg['calculations']['tax_rate']
         tax_amount = subtotal * tax_rate
         total = subtotal + shipping_cost + tax_amount
         
-        currency_symbol = self.config['formatting']['currency_symbol']
-        number_format = self.config['formatting']['number_format']
+        currency_symbol = self.doc_cfg['formatting']['currency_symbol']
+        number_format = self.doc_cfg['formatting']['number_format']
         
         totals_data = [
             ['Subtotal:', self.pdf_builder.format_currency(subtotal, currency_symbol, number_format)],
@@ -373,22 +394,22 @@ def create_sample_data() -> None:
         'order_number': ['SO-1001', 'SO-1001', 'SO-1001', 'SO-1002', 'SO-1002'],
         'customer_name': ['Tech Solutions Inc', 'Tech Solutions Inc', 'Tech Solutions Inc', 'Global Corp', 'Global Corp'],
         'customer_address': ['456 Tech Park\nSilicon Valley, CA 94000', '456 Tech Park\nSilicon Valley, CA 94000',
-                           '456 Tech Park\nSilicon Valley, CA 94000', '789 Corporate Dr\nNew York, NY 10001',
-                           '789 Corporate Dr\nNew York, NY 10001'],
+                            '456 Tech Park\nSilicon Valley, CA 94000', '789 Corporate Dr\nNew York, NY 10001',
+                            '789 Corporate Dr\nNew York, NY 10001'],
         'customer_email': ['orders@techsolutions.com', 'orders@techsolutions.com', 'orders@techsolutions.com',
-                          'purchasing@globalcorp.com', 'purchasing@globalcorp.com'],
+                            'purchasing@globalcorp.com', 'purchasing@globalcorp.com'],
         'customer_phone': ['(555) 555-0123', '(555) 555-0123', '(555) 555-0123', '(555) 555-0456', '(555) 555-0456'],
         'shipping_name': ['Tech Solutions Inc', 'Tech Solutions Inc', 'Tech Solutions Inc', 'Global Corp Warehouse', 'Global Corp Warehouse'],
         'shipping_address': ['456 Tech Park\nSilicon Valley, CA 94000', '456 Tech Park\nSilicon Valley, CA 94000',
-                           '456 Tech Park\nSilicon Valley, CA 94000', '123 Warehouse Rd\nJersey City, NJ 07302',
-                           '123 Warehouse Rd\nJersey City, NJ 07302'],
+                            '456 Tech Park\nSilicon Valley, CA 94000', '123 Warehouse Rd\nJersey City, NJ 07302',
+                            '123 Warehouse Rd\nJersey City, NJ 07302'],
         'shipping_method': ['Ground', 'Ground', 'Ground', 'Express', 'Express'],
         'order_date': ['2024-02-01', '2024-02-01', '2024-02-01', '2024-02-02', '2024-02-02'],
         'ship_date': ['2024-02-03', '2024-02-03', '2024-02-03', '2024-02-03', '2024-02-03'],
         'delivery_date': ['2024-02-08', '2024-02-08', '2024-02-08', '2024-02-05', '2024-02-05'],
         'item_code': ['WDG-001', 'WDG-002', 'ACC-101', 'PRO-500', 'PRO-501'],
         'description': ['Premium Widget Type A', 'Premium Widget Type B', 'Widget Accessory Kit',
-                       'Professional Service Package', 'Extended Warranty'],
+                        'Professional Service Package', 'Extended Warranty'],
         'quantity': [25, 15, 5, 1, 1],
         'unit_price': [125.50, 135.75, 45.00, 2500.00, 350.00]
     }

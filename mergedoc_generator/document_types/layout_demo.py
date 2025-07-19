@@ -9,8 +9,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from mergedoc_generator.core.base import DocumentGenerator, DocumentConfig
+from mergedoc_generator.core.base import (
+    DocumentGenerator as BaseDocumentGenerator,
+    DocumentConfig as BaseDocumentConfig)
 from mergedoc_generator.core.pdf_builder import PDFBuilder
+from mergedoc_generator.core.position_converter import (
+    Point,
+    PositionConverter as pc
+)
 from reportlab.platypus import Spacer, Paragraph, Table, TableStyle, Image, KeepTogether
 from reportlab.lib.units import inch, mm
 from reportlab.lib import colors
@@ -51,12 +57,12 @@ class DebugRect(Flowable):
             self.canv.drawString(5, self.height - 15, self.label)
 
 
-class DocumentConfig(DocumentConfig):
+class DocumentConfig(BaseDocumentConfig):
     """Layout Demo configuration."""
     
     def get_default_config(self) -> dict[str, Any]:
         """Get default layout demo configuration."""
-        base_config = super().get_default_config()
+        base_config: dict[str: Any] = super().get_default_config()
         
         demo_config = {
             "document_type": "layout_demo",
@@ -84,11 +90,12 @@ class DocumentConfig(DocumentConfig):
         return base_config
 
 
-class DocumentGenerator(DocumentGenerator):
+class DocumentGenerator(BaseDocumentGenerator):
     """Layout Demo document generator."""
     
     def __init__(self, config: DocumentConfig):
         super().__init__(config)
+
         self.pdf_builder = PDFBuilder(self.config)
         self.debug_mode = self.config.get('debug_mode', False)
         
@@ -146,7 +153,7 @@ class DocumentGenerator(DocumentGenerator):
         
         # Title
         title = Paragraph("<b>LAYOUT DEMO - All Positioning Techniques</b>", 
-                         self.pdf_builder.styles['DocumentTitle'])
+                            self.pdf_builder.styles['DocumentTitle'])
         story.append(title)
         story.append(Spacer(1, 20))
         
@@ -160,43 +167,43 @@ class DocumentGenerator(DocumentGenerator):
         
         # 1. BASIC TWO-COLUMN LAYOUT
         story.append(Paragraph("<b>1. Two-Column Layout (Header Style)</b>", 
-                              self.pdf_builder.styles['Heading2']))
+                                self.pdf_builder.styles['Heading2']))
         story.extend(self._demo_two_column_layout())
         story.append(Spacer(1, 20))
         
         # 2. THREE-COLUMN LAYOUT  
         story.append(Paragraph("<b>2. Three-Column Layout</b>", 
-                              self.pdf_builder.styles['Heading2']))
+                                self.pdf_builder.styles['Heading2']))
         story.extend(self._demo_three_column_layout())
         story.append(Spacer(1, 20))
         
         # 3. NESTED TABLES
         story.append(Paragraph("<b>3. Nested Tables for Complex Layouts</b>", 
-                              self.pdf_builder.styles['Heading2']))
+                                self.pdf_builder.styles['Heading2']))
         story.extend(self._demo_nested_tables())
         story.append(Spacer(1, 20))
         
         # 4. MIXED CONTENT POSITIONING
         story.append(Paragraph("<b>4. Mixed Content (Text, Tables, Images)</b>", 
-                              self.pdf_builder.styles['Heading2']))
+                                self.pdf_builder.styles['Heading2']))
         story.extend(self._demo_mixed_content())
         story.append(Spacer(1, 20))
         
         # 5. ALIGNMENT TECHNIQUES
         story.append(Paragraph("<b>5. Alignment Techniques</b>", 
-                              self.pdf_builder.styles['Heading2']))
+                                self.pdf_builder.styles['Heading2']))
         story.extend(self._demo_alignment_techniques())
         story.append(Spacer(1, 20))
         
         # 6. SPACING AND PADDING
         story.append(Paragraph("<b>6. Spacing and Padding Control</b>", 
-                              self.pdf_builder.styles['Heading2']))
+                                self.pdf_builder.styles['Heading2']))
         story.extend(self._demo_spacing_control())
         story.append(Spacer(1, 20))
         
         # 7. OVERLAPPING ELEMENTS (Pseudo-overlapping)
         story.append(Paragraph("<b>7. Pseudo-Overlapping Elements</b>", 
-                              self.pdf_builder.styles['Heading2']))
+                                self.pdf_builder.styles['Heading2']))
         story.extend(self._demo_overlapping_elements())
         
         self.pdf_builder.create_document(filepath, story)
@@ -220,8 +227,8 @@ class DocumentGenerator(DocumentGenerator):
         """
         
         table = Table([
-            [Paragraph(left_content, self.pdf_builder.styles['Normal']),
-             Paragraph(right_content, self.pdf_builder.styles['Normal'])]
+            [   Paragraph(left_content, self.pdf_builder.styles['Normal']),
+                Paragraph(right_content, self.pdf_builder.styles['Normal'])]
         ], colWidths=[3*inch, 3*inch])
         
         table.setStyle(TableStyle(self._get_debug_style('header')))
@@ -258,7 +265,7 @@ class DocumentGenerator(DocumentGenerator):
         outer_table = Table([
             ["Description", inner_table],
             ["Notes", Paragraph("This shows how tables can be nested", 
-                               self.pdf_builder.styles['Normal'])]
+                                self.pdf_builder.styles['Normal'])]
         ], colWidths=[1.5*inch, 3*inch])
         
         outer_table.setStyle(TableStyle(self._get_debug_style('content')))
@@ -290,9 +297,9 @@ class DocumentGenerator(DocumentGenerator):
         
         # Different alignments in table cells
         align_table = Table([
-            [Paragraph("Left Aligned", self.pdf_builder.styles['Normal']),
-             Paragraph("Center Aligned", self.pdf_builder.styles['Normal']),
-             Paragraph("Right Aligned", self.pdf_builder.styles['Normal'])]
+            [   Paragraph("Left Aligned", self.pdf_builder.styles['Normal']),
+                Paragraph("Center Aligned", self.pdf_builder.styles['Normal']),
+                Paragraph("Right Aligned", self.pdf_builder.styles['Normal'])]
         ], colWidths=[2*inch, 2*inch, 2*inch])
         
         align_style = self._get_debug_style('content')
@@ -308,9 +315,9 @@ class DocumentGenerator(DocumentGenerator):
         
         # Vertical alignment demo
         valign_table = Table([
-            [Paragraph("Top aligned content", self.pdf_builder.styles['Normal']),
-             Paragraph("Middle aligned<br/>multiline<br/>content", self.pdf_builder.styles['Normal']),
-             Paragraph("Bottom aligned", self.pdf_builder.styles['Normal'])]
+            [   Paragraph("Top aligned content", self.pdf_builder.styles['Normal']),
+                Paragraph("Middle aligned<br/>multiline<br/>content", self.pdf_builder.styles['Normal']),
+                Paragraph("Bottom aligned", self.pdf_builder.styles['Normal'])]
         ], colWidths=[2*inch, 2*inch, 2*inch], rowHeights=[0.8*inch])
         
         valign_style = self._get_debug_style('sidebar')
